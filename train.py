@@ -8,7 +8,7 @@ trainer = TreeTrainer(model, tree_folder)
 filenames = sorted([f for f in os.listdir(tree_folder) if f.endswith('.skel')])
 #trainer.train(filenames, epochs=600)
 
-trainer.prepare_curriculum(filenames, warmup_count=20)
+trainer.prepare_curriculum(filenames)
 trainer.train(epochs=600, curriculum_epochs=10)
 
 

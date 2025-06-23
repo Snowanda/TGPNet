@@ -1,4 +1,6 @@
 import os
+import re
+import ast
 import torch
 import torch.nn as nn
 from utils.graph_utils import parse_tree_data, build_adjacency_matrix, update_influence_weights
@@ -12,9 +14,36 @@ class TreeTrainer:
         self.loss_fn = nn.L1Loss()
         self.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.8)
+        self.curriculum_filenames = []  # will be set later
+        self.full_filenames = []        # training filenames after curriculum
 
-    def train(self, filenames, epochs=10):
+    def prepare_curriculum(self, all_filenames, warmup_count=20):
+        def parse_treenode_num(fname):
+            with open(os.path.join(self.tree_folder, fname)) as f:
+                first_line = f.readline().strip(',\n ')
+                first_line = re.sub(r'(\w+)\s*[:=]', r'"\1":', first_line)
+                try:
+                    entry = ast.literal_eval(first_line)
+                    return int(entry.get("treenode_num", 0))
+                except:
+                    return float('inf')
+        
+        sorted_filenames = sorted(all_filenames, key=parse_treenode_num)
+        # self.test_filenames = sorted_filenames[-test_count:]
+        training_filenames = sorted_filenames
+        self.curriculum_filenames = training_filenames[:warmup_count]
+        self.full_filenames = training_filenames
+
+
+    def train(self, epochs=10, curriculum_epochs=10):
         for epoch in range(epochs):
+            
+            if epoch < curriculum_epochs:
+                filenames = self.curriculum_filenames
+                print(f"\n📘 Curriculum Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
+            else:
+                filenames = self.full_filenames
+                print(f"\n🟢 Main Training Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
             total_loss = 0
             print(f"\n🟢 Epoch {epoch+1}/{epochs} started")
 
@@ -54,7 +83,7 @@ class TreeTrainer:
                     total_loss += loss.item()
 
                     progress = (i + 1) / len(nodes) * 100
-                    print(f"\r⏳ Epoch {epoch+1} | Progress: {progress:.1f}%", end="")
+                    print(f"\r⏳ Epoch {epoch+1} | Sample {f_idx + 1}/{len(filenames)} | Progress: {progress:.1f}%", end="")
 
                     #if (i + 1) % 10 == 0 or i == len(nodes.keys()) - 1:
                     #   print(f"    🧠 Step {i+1}/{len(nodes.keys())} | Node {nid} | Predicted z: {z_pred.item():.5f} | GT z: {gt_z:.5f} | Loss: {loss.item():.5f}")

@@ -17,22 +17,35 @@ class TreeTrainer:
         self.curriculum_filenames = []  # will be set later
         self.full_filenames = []        # training filenames after curriculum
 
-    def prepare_curriculum(self, all_filenames, warmup_count=20):
-        def parse_treenode_num(fname):
+    def prepare_curriculum(self, all_filenames):
+        def parse_header(fname):
             with open(os.path.join(self.tree_folder, fname)) as f:
                 first_line = f.readline().strip(',\n ')
                 first_line = re.sub(r'(\w+)\s*[:=]', r'"\1":', first_line)
                 try:
                     entry = ast.literal_eval(first_line)
-                    return int(entry.get("treenode_num", 0))
+                    return int(entry.get("species_id", -1)), int(entry.get("treenode_num", float("inf")))
                 except:
-                    return float('inf')
-        
-        sorted_filenames = sorted(all_filenames, key=parse_treenode_num)
-        # self.test_filenames = sorted_filenames[-test_count:]
-        training_filenames = sorted_filenames
-        self.curriculum_filenames = training_filenames[:warmup_count]
-        self.full_filenames = training_filenames
+                    return -1, float("inf")
+
+        # Group files by species and find the one with the smallest node count for each
+        species_to_smallest = {}
+        remaining_filenames = []
+
+        for fname in all_filenames:
+            species_id, node_count = parse_header(fname)
+            if species_id == -1:
+                continue
+            if species_id not in species_to_smallest or node_count < species_to_smallest[species_id][1]:
+                if species_id in species_to_smallest:
+                    remaining_filenames.append(species_to_smallest[species_id][0])  # restore replaced file
+                species_to_smallest[species_id] = (fname, node_count)
+            else:
+                remaining_filenames.append(fname)
+
+        self.curriculum_filenames = [v[0] for v in sorted(species_to_smallest.values(), key=lambda x: x[1])]
+        print(self.curriculum_filenames)
+        self.full_filenames = sorted(remaining_filenames, key=lambda f: parse_header(f)[1])
 
 
     def train(self, epochs=10, curriculum_epochs=10):
@@ -83,7 +96,7 @@ class TreeTrainer:
                     total_loss += loss.item()
 
                     progress = (i + 1) / len(nodes) * 100
-                    print(f"\r⏳ Epoch {epoch+1} | Progress: {progress:.1f}%", end="")
+                    print(f"\r⏳ Epoch {epoch+1} | Sample {f_idx + 1}/{len(filenames)} | Progress: {progress:.1f}%", end="")
 
                     #if (i + 1) % 10 == 0 or i == len(nodes.keys()) - 1:
                     #   print(f"    🧠 Step {i+1}/{len(nodes.keys())} | Node {nid} | Predicted z: {z_pred.item():.5f} | GT z: {gt_z:.5f} | Loss: {loss.item():.5f}")
