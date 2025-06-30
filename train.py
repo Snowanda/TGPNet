@@ -2,14 +2,14 @@ import os
 from models.tgpnet import TGPNet
 from trainer.test import TreeTrainer
 
-tree_folder = "data/dataset"
+tree_folder = "data/datasetFull"
 model = TGPNet()
 trainer = TreeTrainer(model, tree_folder)
 filenames = sorted([f for f in os.listdir(tree_folder) if f.endswith('.skel')])
 #trainer.train(filenames, epochs=600)
 
 trainer.prepare_curriculum(filenames)
-trainer.train(epochs=20, curriculum_epochs=10)
+trainer.train(epochs=30, curriculum_epochs=10)
 
 
 """import torch
