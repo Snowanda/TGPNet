@@ -1,6 +1,7 @@
 import os
 import re
 import ast
+import csv
 import torch
 import torch.nn as nn
 from utils.graph_utils import parse_tree_data, build_adjacency_matrix, update_influence_weights
@@ -52,6 +53,11 @@ class TreeTrainer:
 
     def train(self, epochs=10, curriculum_epochs=10):
         for epoch in range(epochs):
+            if not os.path.exists("debug_logs_batched.csv"):
+                with open("debug_logs_batched.csv", mode="w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Epoch", "Filename", "NodeID", "GT_z", "Pred_z", "AbsError", "PercentError"])
+
             if epoch < curriculum_epochs:
                 filenames = self.curriculum_filenames
                 print(f"\n📘 Curriculum Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
@@ -93,6 +99,21 @@ class TreeTrainer:
                     gt_z_tensor = torch.tensor([gt_z], dtype=torch.float32, device=self.device)
 
                     z_pred = self.model(local_input, X_step, A, current_idx)
+
+                    # 🔍 Debug log (append right after prediction)
+                    with open("debug_logs_batched.csv", mode="a", newline="") as f:
+                        writer = csv.writer(f)
+                        abs_error = abs(z_pred.item() - gt_z)
+                        pct_error = abs_error / (abs(gt_z) + 1e-8) * 100
+                        writer.writerow([
+                            epoch + 1,
+                            fname,
+                            nid,
+                            f"{gt_z:.6f}",
+                            f"{z_pred.item():.6f}",
+                            f"{abs_error:.6f}",
+                            f"{pct_error:.2f}"
+                        ])
                     batch_node_preds.append(z_pred)
                     batch_node_targets.append(gt_z_tensor)
 
@@ -130,4 +151,4 @@ class TreeTrainer:
             print(f"\n✅ Epoch {epoch+1} finished | Avg Loss per Node: {avg_loss:.6f} | Total Loss: {total_loss:.6f}")
 
         torch.save(self.model.state_dict(), "checkpoints/tgpnet_test.pth")
-        print("💾 Model saved to checkpoints/tgpnet_final.pth")
+        print("💾 Model saved to checkpoints/tgpnet_test.pth")
