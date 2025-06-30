@@ -1,8 +1,8 @@
 import os
 from models.tgpnet import TGPNet
-from trainer.test import TreeTrainer
+from trainer.tree_trainer import TreeTrainer
 
-tree_folder = "data/datasetFull"
+tree_folder = "data/dataset"
 model = TGPNet()
 trainer = TreeTrainer(model, tree_folder)
 filenames = sorted([f for f in os.listdir(tree_folder) if f.endswith('.skel')])

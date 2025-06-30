@@ -50,7 +50,6 @@ class TreeTrainer:
 
     def train(self, epochs=10, curriculum_epochs=10):
         for epoch in range(epochs):
-            
             if epoch < curriculum_epochs:
                 filenames = self.curriculum_filenames
                 print(f"\n📘 Curriculum Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
@@ -58,6 +57,7 @@ class TreeTrainer:
                 filenames = self.full_filenames
                 print(f"\n🟢 Main Training Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
             total_loss = 0
+            total_nodes = 0 
             print(f"\n🟢 Epoch {epoch+1}/{epochs} started")
 
             for f_idx, fname in enumerate(filenames):
@@ -94,6 +94,7 @@ class TreeTrainer:
 
                     X[current_idx][2] = z_pred.detach()
                     total_loss += loss.item()
+                    total_nodes += 1
 
                     progress = (i + 1) / len(nodes) * 100
                     print(f"\r⏳ Epoch {epoch+1} | Sample {f_idx + 1}/{len(filenames)} | Progress: {progress:.1f}%", end="")
@@ -102,7 +103,9 @@ class TreeTrainer:
                     #   print(f"    🧠 Step {i+1}/{len(nodes.keys())} | Node {nid} | Predicted z: {z_pred.item():.5f} | GT z: {gt_z:.5f} | Loss: {loss.item():.5f}")
 
             self.scheduler.step()
-            print(f"\n✅ Epoch {epoch+1} finished | Total Loss: {total_loss:.4f}")
+            avg_loss = total_loss / total_nodes if total_nodes > 0 else 0
+            print(f"\n✅ Epoch {epoch+1} finished | Avg Loss per Node: {avg_loss:.6f} | Total Loss: {total_loss:.6f}")
+
 
         torch.save(self.model.state_dict(), "checkpoints/tgpnet_final.pth")
         print("💾 Model saved to checkpoints/tgpnet_final.pth")
