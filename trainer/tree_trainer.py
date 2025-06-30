@@ -129,5 +129,5 @@ class TreeTrainer:
             avg_loss = total_loss / total_nodes if total_nodes > 0 else 0
             print(f"\n✅ Epoch {epoch+1} finished | Avg Loss per Node: {avg_loss:.6f} | Total Loss: {total_loss:.6f}")
 
-        torch.save(self.model.state_dict(), "checkpoints/tgpnet_final.pth")
+        torch.save(self.model.state_dict(), "checkpoints/tgpnet_test.pth")
         print("💾 Model saved to checkpoints/tgpnet_final.pth")

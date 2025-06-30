@@ -1,43 +1,55 @@
-import os
 import torch
-from utils.graph_utils import parse_tree_data, build_adjacency_matrix, compute_feature_matrix_with_w
-from models.tgpnet import TGPNet
-from trainer.tree_trainer import TreeTrainer
+from models.tgpnet import TGPNet  # Replace with your model class
+from utils.graph_utils import parse_tree_data, build_adjacency_matrix, update_influence_weights
+import os
+import re
+import ast
 
-def save_predicted_skel(fname, nodes, X, idx_map, out_path):
-    with open(os.path.join(out_path, fname), 'w') as f:
-        for nid, i in idx_map.items():
-            x, y = X[i][0].item(), X[i][1].item()
-            z_pred = X[i][2].item()
-            node = nodes[nid]
-            children = node['children']
-            f.write(f'{{"type": "treenode", "node_id": {nid}, "pos": [{x:.6f}, {y:.6f}, {z_pred:.6f}], '
-                    f'"parent_id": {node["parent"]}, "children_ids": {children}, '
-                    f'"radius": {node["radius"]}, "branch_id": {node["branch_id"]} }},\n')
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = TGPNet().to(device)
+model.load_state_dict(torch.load("checkpoints/tgpnet_test.pth"))
+model.eval()
 
-def predict_single_file(model_path, skel_file, output_path):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = TGPNet().to(device)
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
+tree_folder = "data/datasetFull"
+test_files = [
+    "tree_0001.skel",
+    "tree_0002.skel",
+    "tree_0004.skel",
+    "tree_0006.skel"
+]
 
-    with open(skel_file) as f:
+def parse_header(fname):
+    with open(os.path.join(tree_folder, fname)) as f:
+        first_line = f.readline().strip(',\n ')
+        first_line = re.sub(r'(\w+)\s*[:=]', r'"\1":', first_line)
+        return ast.literal_eval(first_line)
+
+for fname in test_files:
+    print(f"\n🌲 Rebuilding: {fname}")
+    with open(os.path.join(tree_folder, fname)) as f:
         lines = f.readlines()
     nodes, edges = parse_tree_data(lines)
+
     X, A, idx_map = build_adjacency_matrix(nodes, edges)
-    A = A.to(device)
     X = X.to(device)
+    A = A.to(device)
+    X[0, 3] = 1.0
+    w_cache = {0: torch.tensor([1.0], dtype=torch.float32)}
 
-    trainer = TreeTrainer(model, os.path.dirname(skel_file), device)
-    bfs_order = trainer.get_bfs_order(nodes)
+    node_ids = list(nodes.keys())
+    diffs = []
 
-    for nid in bfs_order:
+    for i, nid in enumerate(node_ids[1:], start=1):
         current_idx = idx_map[nid]
-        X = compute_feature_matrix_with_w(X, A, current_idx)
-        local_input = X[current_idx][:2].to(device)
-        with torch.no_grad():
-            z_pred = model(local_input, X, A, current_idx)
-            X[current_idx][2] = z_pred
+        gt_z = nodes[nid]['pos'][2]
 
-    os.makedirs(output_path, exist_ok=True)
-    save_predicted_skel(os.path.basename(skel_file), nodes, X, idx_map, output_path)
+        X, w_cache = update_influence_weights(X, nodes, idx_map, current_idx, w_cache)
+        local_input = X[current_idx][:2]
+        with torch.no_grad():
+            z_pred = model(local_input, X, A, current_idx).item()
+        pred_z = z_pred
+        diff_pct = abs(pred_z - gt_z) / abs(gt_z + 1e-8) * 100
+        diffs.append(diff_pct)
+
+    avg_diff = sum(diffs) / len(diffs)
+    print(f"📊 Average % z-error for {fname}: {avg_diff:.2f}%")
