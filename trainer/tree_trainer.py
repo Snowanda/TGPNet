@@ -30,7 +30,7 @@ class TreeTrainer:
 
         # Group files by species and find the one with the smallest node count for each
         species_to_smallest = {}
-        remaining_filenames = []
+        other_filenames = []
 
         for fname in all_filenames:
             species_id, node_count = parse_header(fname)
@@ -38,15 +38,17 @@ class TreeTrainer:
                 continue
             if species_id not in species_to_smallest or node_count < species_to_smallest[species_id][1]:
                 if species_id in species_to_smallest:
-                    remaining_filenames.append(species_to_smallest[species_id][0])  # restore replaced file
+                    other_filenames.append(species_to_smallest[species_id][0])  # replace previous
                 species_to_smallest[species_id] = (fname, node_count)
             else:
-                remaining_filenames.append(fname)
+                other_filenames.append(fname)
 
+        # Extract curriculum filenames
         self.curriculum_filenames = [v[0] for v in sorted(species_to_smallest.values(), key=lambda x: x[1])]
-        print(self.curriculum_filenames)
-        self.full_filenames = sorted(remaining_filenames, key=lambda f: parse_header(f)[1])
 
+        # ✅ Include them in full training too
+        full_list = self.curriculum_filenames + other_filenames
+        self.full_filenames = sorted(full_list, key=lambda f: parse_header(f)[1])
 
     def train(self, epochs=10, curriculum_epochs=10):
         for epoch in range(epochs):
