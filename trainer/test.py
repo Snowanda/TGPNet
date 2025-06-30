@@ -53,7 +53,7 @@ class TreeTrainer:
             total_loss, total_nodes = 0, 0
 
             for f_idx, fname in enumerate(filenames):
-                print(fname)
+                #print(fname)
                 with open(os.path.join(self.tree_folder, fname)) as f:
                     lines = f.readlines()
                 nodes, edges = parse_tree_data(lines)
