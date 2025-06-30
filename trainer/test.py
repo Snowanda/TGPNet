@@ -49,7 +49,7 @@ class TreeTrainer:
 
         # ✅ Include them in full training too
         full_list = self.curriculum_filenames + other_filenames
-        self.full_filenames = sorted(full_list, key=lambda f: parse_header(f)[1])[:10]
+        self.full_filenames = sorted(full_list, key=lambda f: parse_header(f)[1])
 
 
     def train(self, epochs=10, curriculum_epochs=10):
