@@ -1,6 +1,6 @@
 import os
 from models.tgpnet import TGPNet
-from trainer.tree_trainer import TreeTrainer
+from trainer.test import TreeTrainer
 
 tree_folder = "data/dataset"
 model = TGPNet()

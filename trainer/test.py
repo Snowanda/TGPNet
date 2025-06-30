@@ -1,12 +1,13 @@
 import os
 import re
 import ast
+import csv
 import torch
 import torch.nn as nn
 from utils.graph_utils import parse_tree_data, build_adjacency_matrix, update_influence_weights
 
 class TreeTrainer:
-    def __init__(self, model, tree_folder, device="cuda"):
+    def __init__(self, model, tree_folder, log_path="debug_logs.csv", device="cuda"):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = model.to(device)
         self.tree_folder = tree_folder
@@ -14,8 +15,14 @@ class TreeTrainer:
         self.loss_fn = nn.L1Loss()
         self.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.8)
-        self.curriculum_filenames = []  # will be set later
-        self.full_filenames = []        # training filenames after curriculum
+        self.curriculum_filenames = []
+        self.full_filenames = []
+        self.log_path = log_path
+
+        # Prepare log file
+        with open(self.log_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Epoch", "Filename", "NodeID", "GT_z", "Pred_z", "AbsError", "PercentError"])
 
     def prepare_curriculum(self, all_filenames):
         def parse_header(fname):
@@ -28,84 +35,66 @@ class TreeTrainer:
                 except:
                     return -1, float("inf")
 
-        # Group files by species and find the one with the smallest node count for each
         species_to_smallest = {}
-        remaining_filenames = []
-
         for fname in all_filenames:
             species_id, node_count = parse_header(fname)
             if species_id == -1:
                 continue
             if species_id not in species_to_smallest or node_count < species_to_smallest[species_id][1]:
-                if species_id in species_to_smallest:
-                    remaining_filenames.append(species_to_smallest[species_id][0])  # restore replaced file
                 species_to_smallest[species_id] = (fname, node_count)
-            else:
-                remaining_filenames.append(fname)
 
         self.curriculum_filenames = [v[0] for v in sorted(species_to_smallest.values(), key=lambda x: x[1])]
-        print(self.curriculum_filenames)
-        self.full_filenames = sorted(remaining_filenames, key=lambda f: parse_header(f)[1])
-
+        self.full_filenames = sorted(all_filenames, key=lambda f: parse_header(f)[1])
 
     def train(self, epochs=10, curriculum_epochs=10):
         for epoch in range(epochs):
-            if epoch < curriculum_epochs:
-                filenames = self.curriculum_filenames
-                print(f"\n📘 Curriculum Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
-            else:
-                filenames = self.full_filenames
-                print(f"\n🟢 Main Training Phase (Epoch {epoch+1}) - Using {len(filenames)} samples")
-            total_loss = 0
-            total_nodes = 0 
-            print(f"\n🟢 Epoch {epoch+1}/{epochs} started")
+            filenames = self.curriculum_filenames if epoch < curriculum_epochs else self.full_filenames
+            print(f"\n📘 Epoch {epoch + 1}/{epochs} | Samples: {len(filenames)}")
+            total_loss, total_nodes = 0, 0
 
             for f_idx, fname in enumerate(filenames):
-                # print(f"\n📄 Processing file {f_idx+1}/{len(filenames)}: {fname}")
-                
+                print(fname)
                 with open(os.path.join(self.tree_folder, fname)) as f:
                     lines = f.readlines()
                 nodes, edges = parse_tree_data(lines)
-                # print(f"🔍 Parsed {len(nodes)} nodes, {len(edges)} edges")
-
                 X, A, idx_map = build_adjacency_matrix(nodes, edges)
-                A = A.to(self.device)
                 X = X.to(self.device)
-                X[0, 3] = 1.0  # Set root node weight w to 1.0
-                w_cache = {0 : torch.tensor([1.0], dtype=torch.float32)}  # Initialize weight cache with root node
+                A = A.to(self.device)
+                X[0, 3] = 1.0
+                w_cache = {0: torch.tensor([1.0], dtype=torch.float32)}
+                
+                node_ids = list(nodes.keys())[1:]
+                self.optimizer.zero_grad()
+                batch_loss = 0
+                with open(self.log_path, 'a', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
 
-                node_ids = list(nodes.keys())
-                for i, nid in enumerate(node_ids[1:], start=1):
-                    current_idx = idx_map[nid]
-                    gt_z = nodes[nid]['pos'][2]
-                    # print(f"🔍 Processing node {nid} at index {current_idx} with ground truth z: {gt_z:.5f}")
+                    for i, nid in enumerate(node_ids):
+                        current_idx = idx_map[nid]
+                        gt_z = nodes[nid]['pos'][2]
+                        X, w_cache = update_influence_weights(X, nodes, idx_map, current_idx, w_cache)
 
-                    X, w_cache = update_influence_weights(X, nodes, idx_map, current_idx, w_cache)
-                    # print(X[:current_idx+1])
+                        local_input = X[current_idx][:2]
+                        gt_z_tensor = torch.tensor([gt_z], dtype=torch.float32, device=self.device)
 
-                    local_input = X[current_idx][:2].to(self.device)
-                    gt_z_tensor = torch.tensor([gt_z], dtype=torch.float32, device=self.device)
+                        z_pred = self.model(local_input, X, A, current_idx)
+                        loss = self.loss_fn(z_pred, gt_z_tensor)
+                        loss.backward(retain_graph=True)
 
-                    self.optimizer.zero_grad()
-                    z_pred = self.model(local_input, X, A, current_idx)
-                    loss = self.loss_fn(z_pred, gt_z_tensor)
-                    loss.backward()
-                    self.optimizer.step()
+                        abs_err = abs(z_pred.item() - gt_z)
+                        percent_err = abs_err / max(abs(gt_z), 1e-6) * 100
 
-                    X[current_idx][2] = z_pred.detach()
-                    total_loss += loss.item()
-                    total_nodes += 1
+                        writer.writerow([epoch + 1, fname, nid, gt_z, z_pred.item(), abs_err, percent_err])
+                        batch_loss += loss.item()
 
-                    progress = (i + 1) / len(nodes) * 100
-                    print(f"\r⏳ Epoch {epoch+1} | Sample {f_idx + 1}/{len(filenames)} | Progress: {progress:.1f}%", end="")
+                        print(f"\r⏳ Epoch {epoch + 1} | Sample {f_idx + 1}/{len(filenames)} | Node {nid} | z GT: {gt_z:.4f} | z Pred: {z_pred.item():.4f} | %Err: {percent_err:.2f}%", end="")
 
-                    #if (i + 1) % 10 == 0 or i == len(nodes.keys()) - 1:
-                    #   print(f"    🧠 Step {i+1}/{len(nodes.keys())} | Node {nid} | Predicted z: {z_pred.item():.5f} | GT z: {gt_z:.5f} | Loss: {loss.item():.5f}")
+                self.optimizer.step()
+                total_loss += batch_loss
+                total_nodes += len(node_ids)
 
             self.scheduler.step()
-            avg_loss = total_loss / total_nodes if total_nodes > 0 else 0
-            print(f"\n✅ Epoch {epoch+1} finished | Avg Loss per Node: {avg_loss:.6f} | Total Loss: {total_loss:.6f}")
+            print(f"\n✅ Epoch {epoch + 1} done | Avg Loss: {total_loss / total_nodes:.6f}")
 
-
-        torch.save(self.model.state_dict(), "checkpoints/tgpnet_final.pth")
-        print("💾 Model saved to checkpoints/tgpnet_final.pth")
+        torch.save(self.model.state_dict(), "checkpoints/tgpnet_debug.pth")
+        print("💾 Debug model saved to checkpoints/tgpnet_debug.pth")
