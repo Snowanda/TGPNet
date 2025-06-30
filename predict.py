@@ -25,10 +25,7 @@ model.eval()
 
 tree_folder = "data/datasetFull"
 test_files = [
-    "tree_0001.skel",
-    "tree_0002.skel",
-    "tree_0004.skel",
-    "tree_0006.skel"
+    "tree_0643.skel"
 ]
 
 def parse_header(fname):
