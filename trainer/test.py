@@ -53,6 +53,10 @@ class TreeTrainer:
 
 
     def train(self, epochs=10, curriculum_epochs=10):
+        x_min, x_max = -0.708188, 0.742315
+        y_min, y_max = -0.160121, 1.000000
+        z_min, z_max = -0.691104, 0.762658
+
         for epoch in range(epochs):
             if epoch < curriculum_epochs:
                 filenames = self.curriculum_filenames
@@ -73,6 +77,9 @@ class TreeTrainer:
                 # print(f"🔍 Parsed {len(nodes)} nodes, {len(edges)} edges")
 
                 X, A, idx_map = build_adjacency_matrix(nodes, edges)
+                # X = normalize_xy(X) 
+                X[:, 0] = 2 * (X[:, 0] - x_min) / (x_max - x_min) - 1  # Normalize x to [-1, 1]
+                X[:, 1] = 2 * (X[:, 1] - y_min) / (y_max - y_min) - 1  # Normalize y to [-1, 1]
                 A = A.to(self.device)
                 X = X.to(self.device)
                 X[0, 3] = 1.0  # Set root node weight w to 1.0
@@ -82,13 +89,11 @@ class TreeTrainer:
                 for i, nid in enumerate(node_ids[1:], start=1):
                     current_idx = idx_map[nid]
                     gt_z = nodes[nid]['pos'][2]
-                    # print(f"🔍 Processing node {nid} at index {current_idx} with ground truth z: {gt_z:.5f}")
-
                     X, w_cache = update_influence_weights(X, nodes, idx_map, current_idx, w_cache)
-                    # print(X[:current_idx+1])
 
                     local_input = X[current_idx][:2].to(self.device)
-                    gt_z_tensor = torch.tensor([gt_z], dtype=torch.float32, device=self.device)
+                    gt_z_norm = 2 * (gt_z - z_min) / (z_max - z_min) - 1
+                    gt_z_tensor = torch.tensor([gt_z_norm], dtype=torch.float32, device=self.device)
 
                     self.optimizer.zero_grad()
                     z_pred = self.model(local_input, X, A, current_idx)
@@ -106,14 +111,15 @@ class TreeTrainer:
                     debug_file = "debug_logs.csv"
                     with open(debug_file, mode="a", newline="") as f:
                         writer = csv.writer(f)
-                        abs_error = abs(z_pred.item() - gt_z)
+                        z_pred_raw = (z_pred.item() + 1) / 2 * (z_max - z_min) + z_min
+                        abs_error = abs(z_pred_raw - gt_z)
                         pct_error = abs_error / (abs(gt_z) + 1e-8) * 100
                         writer.writerow([
                             epoch + 1,
                             fname,
                             nid,
                             f"{gt_z:.6f}",
-                            f"{z_pred.item():.6f}",
+                            f"{z_pred_raw:.6f}",
                             f"{abs_error:.6f}",
                             f"{pct_error:.2f}"
                         ])

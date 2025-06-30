@@ -22,7 +22,8 @@ class DepthInferenceModule(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(64, 16),
             nn.LeakyReLU(),
-            nn.Linear(16, 1)
+            nn.Linear(16, 1),
+            nn.Tanh()
         )
 
     def forward(self, local_feat, global_feat):
