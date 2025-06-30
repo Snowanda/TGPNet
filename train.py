@@ -9,7 +9,7 @@ filenames = sorted([f for f in os.listdir(tree_folder) if f.endswith('.skel')])
 #trainer.train(filenames, epochs=600)
 
 trainer.prepare_curriculum(filenames)
-trainer.train(epochs=600, curriculum_epochs=10)
+trainer.train(epochs=600, curriculum_epochs=1)
 
 
 """import torch
